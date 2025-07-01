@@ -206,8 +206,7 @@ class MarketEnvironment:
         MARKET['state']['count_of_days'] = getattr(ql,DATECOUNT)();
         date = pd.Timestamp(CURRENT_DATE).normalize();
         MARKET['values']['spot'] = ql.QuoteHandle(ql.SimpleQuote(UNDERLYING));
-        rfr = MARKET['chart']['interests'].loc[('DFF.Fred',date), 'value'] if ('DFF.Fred',date) in MARKET['chart']['interests'].index else MARKET['values']['rfr']
-        # 'DFF.Fred'
+        rfr = MARKET['chart']['interests'].xs(date, level='time')['value'].iloc[0]
         MARKET['state']['rfr'] = ql.SimpleQuote(rfr) if not isinstance(rfr, ql.SimpleQuote) else rfr
         div = MARKET['chart']['dividends'].at[(MARKET['ticker'].Symbol.value,date), 'dividend'] if ('SPY',date) in MARKET['chart']['dividends'].index else MARKET['values']['div']
         MARKET['values']['div']  = ql.SimpleQuote(div) if not isinstance(div, ql.SimpleQuote) else div
@@ -360,6 +359,3 @@ def BACKTESTER(ENVIRONMENT,MARKET, PORTFOLIO):
             # after the events are handled, run the strategy
             PORTFOLIO.strategy(ENVIRONMENT,PORTFOLIO, MARKET, ROW);
         #break
-
-
-# BUG : doesnt locate rfr, and dividend
