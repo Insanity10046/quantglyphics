@@ -152,6 +152,7 @@ class Position:
         self.id = uuid.uuid4();
         self.asset = asset;
         self.entry = entry;
+        self.entry_time = None;
         self.direction = direction;
         self.contract = contract;
         self.size = qty;
@@ -232,13 +233,14 @@ class Broker:
         self.vol_slippage = SLIPPAGE[1];
         self.reg_fee = sum(FEES);
         self.execution_fee = FEES[3];
-    def BA_SPREAD(self, BID, ASK, ORDER):
+    def BA_SPREAD(self, BID, ASK, ORDER_SIZE):
         spread = BID - ASK;
-        execution_price = ASK if order['size'] > 0 else BID;
+        execution_price = ASK if ORDER_SIZE > 0 else BID;
         mid_price = (ASK + BID) / 2
         return spread, execution_price, mid_price;
-    def SLIPPAGE(self,ROW, ORDER, AVG_VOLUME,BID, ASK, DAILY_VOL):
-        spread, execution_price, mid_price = self.BA_SPREAD(BID,ASK,ORDER);
+    def SLIPPAGE(self,ROW, ORDER_SIZE, VOLUME,BID, ASK, DAILY_VOL):
+        AVG_VOLUME = ROW['volume'].rolling(window=20).mean();
+        spread, execution_price, mid_price = self.BA_SPREAD(BID,ASK,ORDER_SIZE);
         size_ratio = min(abs(ORDER_SIZE) / max(AVG_VOLUME, 1), 1.0)
         impact = DAILY_VOL * math.sqrt(size_ratio) * spread
         slippage = impact if ORDER_SIZE > 0 else -impact
@@ -249,9 +251,10 @@ class Broker:
         return exec_price
     def EXECUTION_MODEL(self, PORTFOLIO, O_P, OHLC, DATA):
         if O_P['decision'] == 'open':
+            entry = SLIPPAGE(OHLC, O_P['qty'], OHLC['volume'],DATA['bid'], DATA['ask'], DATA['daily_vol']) if O_P['order_type'] == 'market_order' else O_P['entry']
             order = Position(O_P['asset'],O_P['contract'],O_P['qty'],self.comission,self.execution_fee,O_P['order_type'],O_P['stop_loss'],O_P['entry'],PORTFOLIO);
             PORTFOLIO.cash -= self.comission
-            # set entry time
+            order.entry_time = OHLC.name[1].to_pydatetime();
             PORTFOLIO.positions.append(order);
         else:
             position = next((obj for obj in PORTFOLIO.positions if obj.id == O_P['order']), None);
@@ -358,4 +361,3 @@ def BACKTESTER(ENVIRONMENT,MARKET, PORTFOLIO):
         if _EVENTMANAGER.EVENT_HANDLER(_d,PORTFOLIO, ROW):
             # after the events are handled, run the strategy
             PORTFOLIO.strategy(ENVIRONMENT,PORTFOLIO, MARKET, ROW);
-        #break
