@@ -30,7 +30,7 @@ def BuyAndHold_Strategy(QLCONTEXT):
 
     dividend = _Market.GET_DIVIDEND_YIELD(current_date);
     interest = _Market.GET_INTEREST_RATE(current_date);
-    
+
     QLCONTEXT.BrokerageModel.EXECUTION_MODEL(
         _Portfolio,
         {
@@ -46,12 +46,22 @@ def BuyAndHold_Strategy(QLCONTEXT):
         }, # -- order_parameter
         _Market
     );
-    #print(_Portfolio.positions)
+    if current_date == _Market.chart.tail(1)['Close'].index[0]:
+        for position in QLCONTEXT.Portfolio.positions:
+            QLCONTEXT.Portfolio.capital+=QLCONTEXT.BrokerageModel.EXECUTION_MODEL(
+                QLCONTEXT.Portfolio,
+                {
+                    'decision': 'close',
+                    'order': position.id
+                },
+                QLCONTEXT.MarketEnvironment
+            )
+
 MyPortfolio.strategy = BuyAndHold_Strategy;
 M_QLY.BACKTEST(SPY_Environment, QLContext)
 
 total_pnl = 0;
-for position in MyPortfolio.positions:
-    print(position.pnl);
-    total_pnl += position.pnl;
+for position in MyPortfolio.trade_history:
+    total_pnl += position['pnl']
 print(f"total pnl:{total_pnl}");
+print(MyPortfolio.capital)
