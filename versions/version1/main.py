@@ -1,7 +1,8 @@
+
 import yfinance as M_YF;
 import pandas as M_PD;
 import datetime as M_DT;
-
+import uuid as M_UID
 #---------------------------------------
 #               :HELPER:               #
 #---------------------------------------
@@ -19,20 +20,18 @@ class EventManager:
     def __init__(self):
         self.market_status: str = 'close';
     def MARKET_SCHEDULE(self,DATE: M_DT.datetime) -> bool:
-        self.market_status: str = 'open' if DATE.weekday() >= 4 else 'close';
+        self.market_status: str = 'open' if DATE.weekday() <= 4 else 'close';
     def ORDER_MANAGEMENT(self, QLCONTEXT: type, CURRENT_PRICE: float) -> list:
-        return [position for position in QLCONTEXT.Portfolio.positions if position.executed == False];
+        return [QLCONTEXT.BrokerageModel.HANDLE_ORDER_TYPE(position,CURRENT_PRICE) for position in QLCONTEXT.Portfolio.positions if position.executed == False];
     def ON_NEW_PRICE(self, QLCONTEXT: type, PRICE: None) -> None:
         QLCONTEXT.BrokerageModel.MARK_TO_MARKET(QLCONTEXT.Portfolio, PRICE);
     def EVENT_MANAGEMENT(self, TIME: M_DT.datetime, QLCONTEXT: type, PRICE: float) -> bool:
         self.MARKET_SCHEDULE(DATE=TIME);
-        if self.market_status == 'open':
-            if TIME.weekday() <= 4:
-                orders_to_process = self.ORDER_MANAGEMENT(QLCONTEXT, PRICE);
-                for position in orders_to_process:
-                    QLCONTEXT.BrokerageModel.HANDLE_ORDER_TYPE(position, PRICE)
-            return True;
         self.ON_NEW_PRICE(QLCONTEXT, PRICE);
+        if self.market_status == 'open':
+            if 0 < TIME.weekday() <= 4:
+                self.ORDER_MANAGEMENT(QLCONTEXT, PRICE);
+            return True;
         return False;
 
 class MarketEnvironment:
@@ -44,9 +43,8 @@ class MarketEnvironment:
         self.resolution = RESOLUTION;
         self.current_slice = None;
     def SET_DATA_ATTRIBUTES(self,INTEREST: None,DIVIDEND: None) -> dict:
-        # Reindex interest and dividend data to match the chart index and forward fill missing values
         self.interest = INTEREST.reindex(self.chart.index, method='ffill')
-        self.dividend = DIVIDEND.reindex(self.chart.index, method='ffill')
+        self.dividend = DIVIDEND;
     def GET_INTEREST_RATE(self,TARGET) -> list:
         return self.interest.loc[TARGET];
     def GET_DIVIDEND_YIELD(self,TARGET) -> list:
@@ -56,7 +54,7 @@ class MarketEnvironment:
     def UPDATE(self, SLICE: None) -> None:
         self.current_slice = SLICE;
     def GET_CURRENT_DATE(self) -> M_DT.datetime:
-        return self.current_slice.name;
+        return next(value for value in self.current_slice if isinstance(value, M_DT.datetime))#self.current_slice.name;
 
 class Position:
     def __init__(self, ORDER_PARAMETER: list, PORTFOLIO: type):
@@ -72,6 +70,7 @@ class Position:
         self.executed = False;
         self._last_price = self.entry_price;
         self.pnl = 0;
+        self.id = M_UID.uuid4();
         self.parent = PORTFOLIO;
     def UPDATE_PNL(self, CURRENT_PRICE: float) -> None:
         self._last_price = CURRENT_PRICE;
@@ -104,9 +103,7 @@ class Broker:
         self.vol_slippage = EXPECTED_VOL_SLIPPAGE;
     #
     def MARK_TO_MARKET(self, PORTFOLIO: type, CURRENT_PRICE: float) -> None:
-        for position in PORTFOLIO.positions:
-            if position.executed:
-                position.UPDATE_PNL(CURRENT_PRICE)
+        return [position.UPDATE_PNL(CURRENT_PRICE) for position in PORTFOLIO.positions if position.executed == True];
 
     def ORDER_LIMIT(self,POSITION: type, CURRENT_PRICE: float) -> None:
         if POSITION.ENTRY_TRIGGER(POSITION.entry_price,CURRENT_PRICE):
@@ -132,27 +129,28 @@ class Broker:
     def CLOSE_ORDER(self,PORTFOLIO: type, EXIT_PRICE: float, TIME: M_DT.datetime, POSITION: type) -> list:
         PORTFOLIO.trade_history.append({
             'id': POSITION.id,
-            'type': position.type,
+            'type': POSITION.order_type,
             'size': POSITION.size,
-            'entry': POSITION.entry,
+            'entry': POSITION.entry_price,
             'exit': EXIT_PRICE,
-            'entry_time': POSITION.entry_time,
+            'entry_time': POSITION.entry_date,
             'exit_time': TIME,
             'pnl': POSITION.pnl,
             'comission': POSITION.commission
         })
-        PORTFOLIO.positions.remove(position)
+        PORTFOLIO.positions.remove(POSITION)
     def OPEN_ORDER(self,PORTFOLIO: type, ORDER_PARAMETER: list) -> list:
         order = Position(ORDER_PARAMETER, PORTFOLIO);
         order.commission = self.comission;
         PORTFOLIO.positions.append(order);
     # :VVV:
     def EXECUTION_MODEL(self,PORTFOLIO: type, ORDER_PARAMETER: list, MARKET: None) -> int:
+        date = MARKET.GET_CURRENT_DATE();
         if ORDER_PARAMETER['decision'] == 'close':
-            date = MARKET.GET_CURRENT_DATE();
             position = next((obj for obj in PORTFOLIO.positions if obj.id == ORDER_PARAMETER['order']), None);
-            self.CLOSE_ORDER(PORTFOLIO, MARKET.GET_VALUE(float, MARKET.current_slice['Close'], date),date, position);
-            return position.CALCULATE_PNL()
+            pnl = position.pnl;
+            self.CLOSE_ORDER(PORTFOLIO,MARKET.GET_VALUE(float,MARKET.current_slice['Close'],date),date,position);
+            return pnl;
         PORTFOLIO.capital -= self.comission;
         self.OPEN_ORDER(PORTFOLIO,ORDER_PARAMETER);
 
